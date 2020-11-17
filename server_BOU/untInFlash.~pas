@@ -1,0 +1,272 @@
+unit untInFlash;
+
+interface
+
+uses
+  Windows, Messages, SysUtils, Variants, Classes, Graphics, Controls, Forms,
+  Dialogs, StdCtrls, ComCtrls, Spin, ExtCtrls, Buttons, DB, MySQLDataset,
+  MySQLServer, IniFiles;
+
+type
+  TfrmInFlash = class(TForm)
+    qRoot: TMySQLQuery;
+    ServerRoot: TMySQLServer;
+    Panel2: TPanel;
+    btnExit: TBitBtn;
+    GroupBox2: TGroupBox;
+    Panel1: TPanel;
+    btnStep1: TBitBtn;
+    btnStep3: TButton;
+    btnStep2: TButton;
+    pbExport: TProgressBar;
+    btnStep4: TButton;
+    pnlStep1: TPanel;
+    lStep1: TLabel;
+    Image3: TImage;
+    Panel3: TPanel;
+    Label4: TLabel;
+    pnlStep2: TPanel;
+    Image1: TImage;
+    lStep2: TLabel;
+    cbPunct: TComboBox;
+    pnlStep5: TPanel;
+    Image4: TImage;
+    Label3: TLabel;
+    pnlStep3: TPanel;
+    Image5: TImage;
+    lStep3: TLabel;
+    pnlStep4: TPanel;
+    Image2: TImage;
+    Label5: TLabel;
+    procedure FormShow(Sender: TObject);
+    procedure btnStep1Click(Sender: TObject);
+    procedure btnStep2Click(Sender: TObject);
+    procedure btnStep3Click(Sender: TObject);
+    procedure btnStep4Click(Sender: TObject);
+    procedure btnExitClick(Sender: TObject);
+  private
+    { Private declarations }
+  public
+    { Public declarations }
+  end;
+
+var
+  frmInFlash: TfrmInFlash;
+
+implementation
+
+uses untGlobalVar, untSpravochnik, untUpdateNew, untFromFlash,
+  unt_OverCredit;
+
+{$R *.dfm}
+
+procedure TfrmInFlash.FormShow(Sender: TObject);
+begin
+  fncExecSQLFillCB('TradePoint', 'NameTP', frmInFlash.cbPunct);
+end;
+
+procedure TfrmInFlash.btnStep1Click(Sender: TObject);
+begin
+  prcGetDriv(ListDriv1);
+  btnStep1.Visible := false;
+  pnlStep1.Visible := false;
+  btnStep2.Visible := true;
+  pnlStep2.Visible := true;
+  frmInFlash.pbExport.Position := 10;
+  btnExit.Enabled := false;
+end;
+
+procedure TfrmInFlash.btnStep2Click(Sender: TObject);
+begin
+  if frmInFlash.cbPunct.ItemIndex = -1 then
+  begin
+    ShowMessage('Выберите точку продажи!');
+    exit;
+  end;
+  btnStep2.Visible := false;
+  pnlStep2.Visible := false;
+  btnStep3.Visible := true;
+  pnlStep3.Visible := true;
+  frmInFlash.pbExport.Position := 20;
+end;
+
+procedure TfrmInFlash.btnStep3Click(Sender: TObject);
+var
+  SDate : string;
+  i,k    : integer;
+  NameF : string;
+begin
+  frmUpdateNew.qTemp.SQL.Clear;
+  frmUpdateNew.qTemp.SQL.Add('insert into historyevents(OperTime, Empl_id, Event_id, memo)');
+  frmUpdateNew.qTemp.SQL.Add('values(Now(), 1, 13, "Начало загрузки кредитов на флешку для ' + cbPunct.Text + '")');
+  frmUpdateNew.qTemp.Execute(true);
+
+  frmInFlash.pbExport.Position := 30;
+  for i := 1 to 6 do
+  begin // ждем когда флешка обнаружиться в системе
+        // поставить прогресс бар
+    sleep(500);
+    prcGetDriv(ListDriv2);
+    if Length(ListDriv1) < Length(ListDriv2) then break;
+    frmInFlash.pbExport.Position := 30 + 5 * i;
+  end;
+
+  if Length(ListDriv1) < Length(ListDriv2) then
+  begin
+    for i := 1 to length(ListDriv2) do
+    begin
+      if Pos(ListDriv2[i], ListDriv1) = 0 then
+      begin // обнаружили букву флешки
+        FlashButton := ListDriv2[i];
+        //------------------ загрузить на флешку стоп-лист---------------------
+        try //инициализация БД в админовской учетной записи
+          tIniSett := TIniFile.Create(PutchFolderPrj + '\Setting.ini');
+          frmInFlash.ServerRoot.Disconnect;
+          frmInFlash.ServerRoot.Port := tIniSett.ReadInteger('MySQL', 'Port', 3306);
+          frmInFlash.ServerRoot.Host := tIniSett.ReadString('MySQL', 'Host', '');
+          frmInFlash.ServerRoot.DatabaseName := tIniSett.ReadString('MySQL', 'DB', '');
+          tIniSett.Destroy;
+          frmInFlash.ServerRoot.Connect;
+        except
+          ShowMessage('Ошибка при инициализации базы!');
+          frmInFlash.ServerRoot.Disconnect;
+          exit;
+        end;
+        k := Round((frmInFlash.pbExport.Max - frmInFlash.pbExport.Position)/7);
+
+        frmInFlash.pbExport.Position := frmInFlash.pbExport.Position + k;
+
+        TradePoint_id := frmInFlash.cbPunct.ItemIndex; // определяем точку продаж
+
+          //вычисляем тех, кто превысил кредит
+        Frm_OverCredit.BitBtn_stopList.Click;
+       
+        fncCreateStopListForTP(); // закидываем на флешку стоп-лист
+
+        // перед выгрузкой удалить с флешки файлы card.bou, pers.bou, credits.bou
+        NameF := FlashButton + ':/' + IntTostr(Tradepoint_id) + '_card.bou';
+        if FileExists(NameF) then
+          DeleteFile(NameF);
+
+        frmInFlash.pbExport.Position := frmInFlash.pbExport.Position + k;
+        // берем таблицу card
+        frmInFlash.qRoot.Close;
+        frmInFlash.qRoot.SQL.Clear;
+        frmInFlash.qRoot.SQL.Add('SELECT * FROM beznal.card ');
+        frmInFlash.qRoot.SQL.Add('where statecard_id=1 ');
+        frmInFlash.qRoot.SQL.Add('into outfile "' + NameF + '" ');
+        frmInFlash.qRoot.Execute(true);
+
+        frmInFlash.pbExport.Position := frmInFlash.pbExport.Position + k;
+
+        // берем таблицу employee
+         NameF := FlashButton + ':/' + IntTostr(Tradepoint_id) + '_employee.bou';
+        if FileExists(NameF) then
+          DeleteFile(NameF);
+
+        frmInFlash.qRoot.Close;
+        frmInFlash.qRoot.SQL.Clear;
+        frmInFlash.qRoot.SQL.Add('SELECT * FROM beznal.employee ');
+        frmInFlash.qRoot.SQL.Add('where Flag=1');
+        frmInFlash.qRoot.SQL.Add('into outfile "' + NameF + '" ');
+        frmInFlash.qRoot.Execute(true);
+
+        frmInFlash.pbExport.Position := frmInFlash.pbExport.Position + k;
+
+        // берем таблицу pers
+        NameF := FlashButton + ':/' + IntTostr(Tradepoint_id) + '_pers.bou';
+        if FileExists(NameF) then
+          DeleteFile(NameF);
+
+        frmInFlash.pbExport.Position := frmInFlash.pbExport.Position + k;
+
+        frmInFlash.qRoot.Close;
+        frmInFlash.qRoot.SQL.Clear;
+        frmInFlash.qRoot.SQL.Add('SELECT * FROM beznal.pers');
+        frmInFlash.qRoot.SQL.Add('where flagkredita=1');
+        frmInFlash.qRoot.SQL.Add('into outfile "' +  NameF + '"');
+        frmInFlash.qRoot.Execute(true);
+
+        frmInFlash.pbExport.Position := frmInFlash.pbExport.Position + k;
+        // берем таблицу credits
+        NameF := FlashButton + ':/' + IntTostr(Tradepoint_id) + '_credits.bou';
+        if FileExists(NameF) then
+          DeleteFile(NameF);
+
+        frmInFlash.pbExport.Position := frmInFlash.pbExport.Position + k;
+
+        frmInFlash.qRoot.Close;
+        frmInFlash.qRoot.SQL.Clear;
+        frmInFlash.qRoot.SQL.Add('SELECT * FROM beznal.credits');
+        frmInFlash.qRoot.SQL.Add('where dateend >= "' + FormatDateTime('yyyy-mm-dd', now)+ '" ');//20090129 правка
+        frmInFlash.qRoot.SQL.Add('into outfile "' + NameF + '"');
+        frmInFlash.qRoot.Execute(true);
+
+          //создать файл обмена TradePoint_Ok.bou с датой последней загруженной продажи
+          frmFromFlash.qImport.Close;
+          frmFromFlash.qImport.SQL.Clear;       // берем последнюю запись в sale принадлежащую данной tradepoint...
+          frmFromFlash.qImport.SQL.Add('select max(saletime) as MaxST from sale where tradepoint_id = ' + IntToStr(TradePoint_id));
+          frmFromFlash.qImport.Open;
+          sDate := fncDateDelphiToSQL(frmFromFlash.qImport.FieldByName('MaxST').AsDateTime);
+
+          NameF := FlashButton + ':/' + IntToStr(TradePoint_id) + '_Ok.bou';
+          if FileExists(NameF) then             // удалить файл-флаг подтверждения выгрузки если существует
+          begin
+            DeleteFile(NameF);
+          end;
+          AssignFile(TextF, NameF);
+          Rewrite(TextF);                       // ...и записываем в файл-флаг подтверждения выгрузки
+          writeln(TextF, sDate);
+          FileSetAttr(NameF, faHidden);         // устанавливаем аттрибут у файла - скрытый
+          CloseFile(TextF);
+
+        pnlStep4.Visible := true;
+        btnStep4.Visible := true;
+        btnStep3.Visible := false;
+        pnlStep3.Visible := false;
+        frmInFlash.pbExport.Position := frmInFlash.pbExport.Max;
+
+
+        break;
+
+      end;
+    end;
+  end
+  else
+  begin
+    frmInFlash.pbExport.Position := frmInFlash.pbExport.Max;
+    ShowMessage('Не обнаружена флешка, попробуйте начать заново!');
+    pnlStep1.Visible := true;
+    btnStep1.Visible := true;
+    btnStep3.Visible := false;
+    pnlStep3.Visible := false;
+    frmInFlash.pbExport.Position := frmInFlash.pbExport.Min;
+  end;
+  frmInFlash.ServerRoot.Disconnect;
+  btnExit.Enabled := true;
+
+  frmUpdateNew.qTemp.SQL.Clear;
+  frmUpdateNew.qTemp.SQL.Add('insert into historyevents(OperTime, Empl_id, Event_id, memo)');
+  frmUpdateNew.qTemp.SQL.Add('values(Now(), 1, 14, "Окончание загрузки кредитов на флешку для ' + cbPunct.Text + '")');
+  frmUpdateNew.qTemp.Execute(true);
+end;
+
+procedure TfrmInFlash.btnStep4Click(Sender: TObject);
+begin
+  pnlStep1.Visible := true;
+  btnStep1.Visible := true;
+  btnStep3.Visible := false;
+  pnlStep3.Visible := false;
+  btnStep4.Visible := false;
+  pnlStep4.Visible := false;
+  frmInFlash.pbExport.Position := frmInFlash.pbExport.Min;
+  frmInFlash.cbPunct.Text := '';
+  frmInFlash.cbPunct.ItemIndex := -1;
+end;
+
+procedure TfrmInFlash.btnExitClick(Sender: TObject);
+begin
+  close;
+end;
+
+end.

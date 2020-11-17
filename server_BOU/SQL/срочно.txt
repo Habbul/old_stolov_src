@@ -1,0 +1,12 @@
+//вы€вление повтор€ющихс€ персон
+select * from pers p1, pers p2 where p1.pers_id<>p2.pers_id and p1.card_id=p2.card_id
+order by p1.family, p1.pers_id
+
+//удаление повтор€ющихс€ персон
+delete from pers where pers_id='3058' or pers_id='1437' or pers_id='347' or pers_id='124' or pers_id='1513'
+or pers_id='131' or pers_id='132' or pers_id='535' or pers_id='3211' or pers_id='1672' or pers_id='3217'
+or pers_id='1738' or pers_id='3279' or pers_id='3286' or pers_id='3458' or pers_id='3352' or pers_id='3355'
+
+//удаление повтор€ющихс€ персон 14.05.2007
+delete from pers where pers_id='3673' or pers_id='3393' or pers_id='2121' or pers_id='1649'
+or pers_id='3519'

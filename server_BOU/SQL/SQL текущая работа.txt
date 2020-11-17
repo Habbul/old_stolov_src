@@ -1,0 +1,49 @@
+SELECT * FROM information_schema.TRIGGERS T;
+
+SELECT * FROM historyevents h;
+
+SELECT * FROM sale s;
+
+insert into sale(card_id, Empl_id, summa, saletime)
+values(1, 1, '100,54', Now())
+
+insert into eventstab(EventName)
+values('Приложение закрыто')
+
+//Select history
+SELECT h.opertime, h.card_id, h.pers_id, h.empl_id, e.eventname, h.memo FROM historyevents h
+left join eventstab e on (h.event_id = e.event_id)
+
+//ведомость
+SELECT p.TabNum, p.Family, p.Name, p.ParentName, sum(s.summa) as summa FROM sale s, card c, pers p
+where s.card_id = c.card_id and c.card_id = p.card_id and date(s.saletime) = current_date()
+group by c.card_id
+
+update typeemployers set post = 'Чужой' where typeempl_id = 5
+
+
+// перебить номера БСК в таблице temp, 
+// забить № Тимуру, 
+// удалить все с пустыми номерами
+// изменить фамилию Ильмире
+
+update temp t
+set t.nomer = (SELECT c.nomer FROM card c, pers p
+               where c.card_id=p.card_id and p.flagkredita = 1 and t.tabnum=p.tabnum)
+
+update temp set nomer='264547813' where id = 
+update temp set nomer='2609829505' where id = 
+
+delete FROM temp where nomer is null
+
+update pers set family='Шириязданова' where card_id=
+
+update temp
+set nomer = id where nomer is null
+
+// удалить из tempsale все строки которые есть в sale
+delete from tempsale where saletime in (select saletime from sale)
+//или
+delete from tempsale
+where saletime in (select saletime from sale)
+and tradepoint_id in (select tradepoint_id from sale)

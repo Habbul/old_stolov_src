@@ -1,0 +1,32 @@
+//триггер на запись в таблицу историй, события после вставки в таблицу Sale
+CREATE TRIGGER HistoryEventsAfterInsSale AFTER INSERT ON beznal.Sale
+  FOR EACH ROW
+    INSERT INTO beznal.HistoryEvents set opertime = Now(),
+                                  Card_id = New.Card_id,
+                                  Empl_id = New.Empl_id,
+                                  pers_id = (select p.pers_id from pers p where card_id = New.Card_id),
+                                  Event_id = 1,
+                                  Memo = New.Summa
+
+//триггер на запись в таблицу историй, события после изменения записи в таблице Employee
+CREATE TRIGGER HistoryEventsAfterUpdEmployee AFTER Update ON beznal.Employee
+  FOR EACH ROW
+    INSERT INTO Beznal.HistoryEvents set opertime = Now(),
+                                  pers_id = New.Empl_id,
+                                  Card_id = (select p.card_id from pers p where p.pers_id = New.Empl_id),
+                                  Event_id = 2
+
+//триггер на запись в таблицу историй, события после вставки записи в таблицу Employee
+CREATE TRIGGER HistoryEventsAfterInsEmployee AFTER INSERT ON beznal.Employee
+  FOR EACH ROW
+    INSERT INTO Beznal.HistoryEvents set opertime = Now(),
+                                  pers_id = New.Empl_id,
+                                  Card_id = (select p.card_id from pers p where p.pers_id = New.Empl_id),
+                                  Event_id = 3
+
+//триггер на запись в таблицу историй, события после изменения состояния БСК на 'черный список' в таблице Card
+CREATE TRIGGER HistoryEventsAfterUpdateCard AFTER Update ON beznal.Card
+  FOR EACH ROW
+    INSERT INTO Beznal.HistoryEvents set opertime = Now(),                              
+                                  Card_id = New.Card_id,
+                                  Event_id = 11

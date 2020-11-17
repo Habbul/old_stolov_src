@@ -1,0 +1,464 @@
+unit untUpdateNew;
+
+interface
+
+uses
+  Windows, Messages, SysUtils, Variants, Classes, Graphics, Controls, Forms,
+  Dialogs, StdCtrls, DB, DBTables, Grids, DBGrids, MySQLDataset, ExtCtrls,
+  Gauges, ComCtrls, DBGridEh, Math, IniFiles;
+
+type
+  TfrmUpdateNew = class(TForm)
+    OpenDialog1: TOpenDialog;
+    DataSource1: TDataSource;
+    qUpdate: TMySQLQuery;
+    tDBFfrom1C: TTable;
+    qTemp: TMySQLQuery;
+    GroupBox1: TGroupBox;
+    Edit1: TEdit;
+    Button1: TButton;
+    Label1: TLabel;
+    Label3: TLabel;
+    lDataCreate: TLabel;
+    btnStep1: TButton;
+    GroupBox2: TGroupBox;
+    ProgressBar1: TProgressBar;
+    Label2: TLabel;
+    mAction: TMemo;
+    btnClose: TButton;
+    Button2: TButton;
+    Label4: TLabel;
+    Label6: TLabel;
+    lCount: TLabel;
+    lPeriod: TLabel;
+    procedure Button1Click(Sender: TObject);
+    procedure btnCloseClick(Sender: TObject);
+    procedure btnStep1Click(Sender: TObject);
+    procedure FormClose(Sender: TObject; var Action: TCloseAction);
+    procedure FormShow(Sender: TObject);
+    procedure Button2Click(Sender: TObject);
+  private
+    { Private declarations }
+  public
+    { Public declarations }
+  end;
+
+var
+  frmUpdateNew: TfrmUpdateNew;
+function fncShowNameFile(NamFile : string) : boolean;
+
+implementation
+
+uses untSpravochnik, DateUtils, untGlobalVar, untThread, unt_OverCredit;
+
+{$R *.dfm}
+
+procedure TfrmUpdateNew.Button1Click(Sender: TObject);
+begin
+  frmUpdateNew.mAction.Clear;
+  frmUpdateNew.ProgressBar1.Position := 0;
+  tDBFfrom1C.Close;
+  if OpenDialog1.Execute then
+  begin
+    Edit1.Text := OpenDialog1.FileName;
+    fncShowNameFile(Edit1.Text);
+  end;
+end;
+
+procedure TfrmUpdateNew.btnCloseClick(Sender: TObject);
+begin
+  close;
+end;
+
+procedure TfrmUpdateNew.btnStep1Click(Sender: TObject);
+var
+  datab, datae      : string;
+  period, day       : integer;
+  timeb, timee      : ttime;
+  CardUpd, CardIns,
+  PersUpd, PersIns, 
+  maxCard, maxPers,
+  maxCredit         : integer;
+  cardid, creditid  : string;
+begin
+try
+  qTemp.SQL.Clear;
+  qTemp.SQL.Add('insert into historyevents(OperTime, Empl_id, Event_id, memo)');
+  qTemp.SQL.Add('values(Now(), 1, 13, "Ќачало обновлени€ кредитов")');
+  qTemp.Execute(true);
+
+  timeb := now;
+  frmUpdateNew.mAction.Visible := true;
+  frmUpdateNew.btnStep1.Enabled := false;
+  frmUpdateNew.btnClose.Enabled := false;
+  frmUpdateNew.ProgressBar1.Position := 0;
+  CardUpd := 0;
+  CardIns := 0;
+  PersUpd := 0;
+  PersIns := 0;
+
+  // защита от задвоени€ записей, проверить есть ли данные по кредиту на текущий период 
+
+  frmUpdateNew.mAction.Lines.Add(DateTimeToStr(Now) + ' ќчищаем стоп-лист');
+  qUpdate.Close;
+  qUpdate.SQL.Clear;
+  qUpdate.SQL.Add('delete from stoplist ');
+  qUpdate.Execute(true);
+
+  frmUpdateNew.mAction.Lines.Add(DateTimeToStr(Now) + ' запрещаем всем кредит');
+  qUpdate.Close;
+  qUpdate.SQL.Clear;
+  qUpdate.SQL.Add('update pers set flagKredita = 2');
+  qUpdate.Execute(true);
+
+  qUpdate.SQL.Clear;
+  qUpdate.SQL.Add('update card set StateCard_id = 2');
+  qUpdate.Execute(true);
+
+//  tDBFfrom1C.TableName := ExtractFileName(Edit1.Text);
+//  tDBFfrom1C.Open;
+  frmUpdateNew.ProgressBar1.Max := tDBFfrom1C.RecordCount;
+  tDBFfrom1C.First;
+
+  frmUpdateNew.mAction.Lines.Add(DateTimeToStr(Now) + ' берем максимальные значени€ id');
+  qTemp.SQL.Clear;
+  qTemp.SQL.Add('SELECT max(card_id) as mcard FROM card');
+  qTemp.Open;
+  maxCard := qTemp.FieldByName('mcard').AsInteger;
+  qTemp.Close;
+  frmUpdateNew.mAction.Lines.Add(DateTimeToStr(Now) + ' maxCard = ' + IntToStr(maxCard));
+
+  qTemp.SQL.Clear;
+  qTemp.SQL.Add('SELECT max(pers_id) as mPers FROM pers');
+  qTemp.Open;
+  maxPers := qTemp.FieldByName('mpers').AsInteger;
+  qTemp.Close;
+  frmUpdateNew.mAction.Lines.Add(DateTimeToStr(Now) + ' maxPers = ' + IntToStr(maxPers));
+
+  qTemp.SQL.Clear;
+  qTemp.SQL.Add('SELECT max(credit_id) as mCredit FROM credits');
+  qTemp.Open;
+  maxCredit := qTemp.FieldByName('mCredit').AsInteger;
+  qTemp.Close;
+  frmUpdateNew.mAction.Lines.Add(DateTimeToStr(Now) + ' maxCredit = ' + IntToStr(maxCredit));
+
+  frmUpdateNew.mAction.Lines.Add(DateTimeToStr(Now) + ' обновл€ем кредиты ');
+  while not tDBFfrom1C.Eof do
+  begin
+    frmUpdateNew.ProgressBar1.Position := frmUpdateNew.ProgressBar1.Position + 1;
+//    frmUpdateNew.mAction.Lines.Add(DateTimeToStr(Now) + ' ' + IntToStr(frmUpdateNew.ProgressBar1.Position));
+
+    Application.ProcessMessages;
+
+    qUpdate.SQL.Clear;
+    qUpdate.SQL.Add('Select * from card where nomer = ''' + tDBFfrom1C.FieldByName('nomer').AsString + ''' ');
+    qUpdate.Open;
+    cardid := qUpdate.fieldbyname('Card_id').AsString;
+
+    case qUpdate.RecordCount of
+      0 : // нет такого номера, добавл€ем новую запись
+        begin
+          inc(maxCard);
+          inc(maxPers);
+          inc(CardIns);
+          cardid := IntToStr(maxCard);
+          qUpdate.Close;
+          qUpdate.SQL.Clear;
+          qUpdate.SQL.Add('insert into card(card_id, StateCard_id, nomer)');
+          qUpdate.SQL.Add('values(' + cardid + ', 1, ');
+          qUpdate.SQL.Add('"' + tDBFfrom1C.FieldByName('nomer').AsString  + '")');
+          qUpdate.Execute;
+
+          inc(PersIns);
+          qUpdate.Close;
+          qUpdate.SQL.Clear;
+          qUpdate.SQL.Add('insert into pers(card_id, pers_id, family, name, parentname, tabnum, flagkredita)');
+          qUpdate.SQL.Add('values(' + cardid + ', ' + IntToStr(maxPers) + ', ');
+          qUpdate.SQL.Add(' "' + tDBFfrom1C.FieldByName('family').AsString  + '", ');
+          qUpdate.SQL.Add(' "' + tDBFfrom1C.FieldByName('name').AsString  + '", ');
+          qUpdate.SQL.Add(' "' + tDBFfrom1C.FieldByName('parentname').AsString  + '", ');
+          qUpdate.SQL.Add(' "' + tDBFfrom1C.FieldByName('tabnum').AsString  + '", 1)');
+          qUpdate.Execute;
+        end;
+      else //есть такой номер, обновл€ем у него значени€
+        begin
+          Inc(CardUpd);
+          qUpdate.Close;
+          qUpdate.SQL.Clear;
+          qUpdate.SQL.Add('update card set statecard_id = 1 where card_id = ' + cardid);
+          qUpdate.Execute;
+
+          qUpdate.Close;
+          qUpdate.SQL.Clear;
+          qUpdate.SQL.Add('select * from pers where card_id = ' + cardid + ' and tabnum = "' + tDBFfrom1C.FieldByName('tabnum').AsString + '" ');
+          qUpdate.Open;
+          case qUpdate.RecordCount of
+            0: // добавл€ем нового сотрудника
+            begin
+              inc(PersIns);
+              inc(maxPers);
+              qUpdate.Close;
+              qUpdate.SQL.Clear;
+              qUpdate.SQL.Add('insert into pers(card_id, pers_id, family, name, parentname, tabnum, flagkredita)');
+              qUpdate.SQL.Add('values(' + cardid + ', ' + IntToStr(maxPers) + ', ');
+              qUpdate.SQL.Add(' "' + tDBFfrom1C.FieldByName('family').AsString  + '", ');
+              qUpdate.SQL.Add(' "' + tDBFfrom1C.FieldByName('name').AsString  + '", ');
+              qUpdate.SQL.Add(' "' + tDBFfrom1C.FieldByName('parentname').AsString  + '", ');
+              qUpdate.SQL.Add(' "' + tDBFfrom1C.FieldByName('tabnum').AsString  + '", 1)');
+              qUpdate.Execute;
+            end;
+            1: // есть такой сотрудник, обновл€ем флаг кредита
+            begin
+              inc(PersUpd);
+              qUpdate.Close;
+              qUpdate.SQL.Clear;
+              qUpdate.SQL.Add('update pers set flagkredita = 1 where card_id = ' + cardid);
+              qUpdate.Execute;
+            end
+          else// ошибка
+            begin
+            end;
+          end;
+        end;
+    end;
+
+    period := tDBFfrom1C.FieldByName('period').AsInteger;
+    case period of
+      1:
+      begin
+        datab := tDBFfrom1C.FieldByName('year').AsString + '-' + tDBFfrom1C.FieldByName('month').AsString + '-01';
+        datae := tDBFfrom1C.FieldByName('year').AsString + '-' + tDBFfrom1C.FieldByName('month').AsString + '-14';
+      end;
+      2:
+      begin
+        day := DaysInAMonth(tDBFfrom1C.FieldByName('year').AsInteger, tDBFfrom1C.FieldByName('month').AsInteger);
+        datab := tDBFfrom1C.FieldByName('year').AsString + '-' + tDBFfrom1C.FieldByName('month').AsString + '-15';
+        datae := tDBFfrom1C.FieldByName('year').AsString + '-' + tDBFfrom1C.FieldByName('month').AsString + '-' + inttostr(day);
+      end;
+    end;
+    qUpdate.Close;
+    qUpdate.SQL.Clear;
+    qUpdate.SQL.Add('select * from credits where ');
+    qUpdate.SQL.Add(' card_id = ' + cardid + ' and ');
+    qUpdate.SQL.Add(' date(datebegin) = date('''+ datab + ''') and date(dateEnd) = date(''' + datae + ''') ');
+    qUpdate.Open;
+    creditid := qUpdate.fieldbyname('credit_id').AsString;
+
+    case qUpdate.RecordCount of
+      0:// данных по кредиту еще нет
+      begin
+        inc(maxCredit);
+        qUpdate.Close;
+        qUpdate.SQL.Clear;
+        qUpdate.SQL.Add('insert into credits(credit_id, card_id, datebegin, dateEnd, sumcredit, Empl_id) ');
+        qUpdate.SQL.Add(' values('+ IntToStr(maxCredit)+', ' + cardid + ', ');
+        qUpdate.SQL.Add(' '''+ datab + ''', ''' + datae + ''', ');
+        qUpdate.SQL.Add(tDBFfrom1C.FieldByName('sumcredit').AsString  + ', 1) ');
+        qUpdate.Execute;
+      end;
+      1:// данные по кредиту уже есть
+      begin
+        qUpdate.Close;
+        qUpdate.SQL.Clear;
+        qUpdate.SQL.Add(' update credits set sumcredit = ' + tDBFfrom1C.FieldByName('sumcredit').AsString);
+        qUpdate.SQL.Add(' where credit_id= ' + creditid);
+        qUpdate.Execute;
+      end;
+    end;
+
+    tDBFfrom1C.Next;
+  end;
+  frmUpdateNew.mAction.Lines.Add(DateTimeToStr(Now) + ' окончание обновлени€ ');
+
+  qTemp.SQL.Clear;
+  qTemp.SQL.Add('SELECT max(card_id) as mcard FROM card');
+  qTemp.Open;
+  maxCard := qTemp.FieldByName('mcard').AsInteger;
+  qTemp.Close;
+  frmUpdateNew.mAction.Lines.Add(DateTimeToStr(Now) + ' maxCard = ' + IntToStr(maxCard));
+
+  qTemp.SQL.Clear;
+  qTemp.SQL.Add('SELECT max(pers_id) as mPers FROM pers');
+  qTemp.Open;
+  maxPers := qTemp.FieldByName('mpers').AsInteger;
+  qTemp.Close;
+  frmUpdateNew.mAction.Lines.Add(DateTimeToStr(Now) + ' maxPers = ' + IntToStr(maxPers));
+
+  qTemp.SQL.Clear;
+  qTemp.SQL.Add('SELECT max(credit_id) as mCredit FROM credits');
+  qTemp.Open;
+  maxCredit := qTemp.FieldByName('mCredit').AsInteger;
+  qTemp.Close;
+  frmUpdateNew.mAction.Lines.Add(DateTimeToStr(Now) + ' maxCredit = ' + IntToStr(maxCredit));
+
+  Application.ProcessMessages;
+  frmUpdateNew.ProgressBar1.Position := 0;
+  frmUpdateNew.btnStep1.Enabled := true;
+  frmUpdateNew.btnClose.Enabled := true;
+
+  frmUpdateNew.mAction.Lines.Add(DateTimeToStr(Now) + ' обновлено записей ' + IntToStr(CardUpd + PersUpd));
+  frmUpdateNew.mAction.Lines.Add(DateTimeToStr(Now) + ' добавлено новых записей ' + IntToStr(CardIns + PersIns));
+  timee := now;
+  frmUpdateNew.mAction.Lines.Add(DateTimeToStr(Now) + ' врем€ обновлени€ = ' + TimeToStr(Timee-timeb));
+
+    //удал€ем двойные записи в перс
+  qTemp.SQL.Clear;
+  qTemp.SQL.Add('select *, p1.pers_id as pers1 from pers p1, pers p2');
+  qTemp.SQL.Add('where p1.pers_id<>p2.pers_id and p1.card_id=p2.card_id');
+  qTemp.SQL.Add('and p1.flagkredita=2');
+  qTemp.SQL.Add('order by p1.family, p1.pers_id');
+  qTemp.Execute(true);
+  qTemp.Open;
+   while not qTemp.Eof do begin
+        qUpdate.Close;
+        qUpdate.SQL.Clear;
+        qUpdate.SQL.Add('delete from pers');
+        qUpdate.SQL.Add('where pers_id='+qTemp.fieldbyname('pers1').AsString);
+        qUpdate.SQL.Add('and flagkredita=2');
+        qUpdate.Execute;
+        qTemp.Next;
+   end;
+
+
+  qTemp.SQL.Clear;
+  qTemp.SQL.Add('insert into historyevents(OperTime, Empl_id, Event_id, memo)');
+  qTemp.SQL.Add('values(Now(), 1, 14, "Ѕаза данных обновлена!")');
+  qTemp.Execute(true);
+
+  //вычисл€ем тех, кто превысил кредит
+  Frm_OverCredit.BitBtn_stopList.Click;
+
+  ShowMessage('Ѕаза данных обновлена!');
+except
+  qTemp.SQL.Clear;
+  qTemp.SQL.Add('insert into historyevents(OperTime, Empl_id, Event_id, memo)');
+  qTemp.SQL.Add('values(Now(), 1, 14, "ѕри обновлении Ѕƒ возникли ошибки! Ѕаза данных не обновлена")');
+  qTemp.Execute(true);
+
+  ShowMessage('ѕри обновлении Ѕƒ возникли ошибки! Ѕаза данных не обновлена.');
+end;
+end;
+
+procedure TfrmUpdateNew.FormClose(Sender: TObject; var Action: TCloseAction);
+begin
+  frmUpdateNew.mAction.Visible := false;
+  tDBFfrom1C.Close;
+  qTemp.Close;
+end;
+
+function fncShowNameFile(NamFile : string) : boolean;
+var
+  db, de, m, y, p : word;
+begin
+  if not FileExists(NamFile) then
+  begin
+    frmUpdateNew.Edit1.Clear;
+    frmUpdateNew.btnStep1.Visible := false;
+    frmUpdateNew.lDataCreate.Caption := 'нет данных';
+    frmUpdateNew.lCount.Caption := 'нет данных';
+    frmUpdateNew.lPeriod.Caption := 'нет данных';
+  end
+  else
+  begin
+    frmUpdateNew.lDataCreate.Caption := FormatDateTime('yyyy-mm-dd hh:nn:ss', FileDateToDateTime(FileAge(NamFile)));
+
+    frmUpdateNew.tDBFfrom1C.DatabaseName := ExtractFilePath(NamFile);
+    frmUpdateNew.tDBFfrom1C.TableName := ExtractFileName(NamFile);
+    frmUpdateNew.tDBFfrom1C.Open;
+    frmUpdateNew.tDBFfrom1C.First;
+
+    frmUpdateNew.lCount.Caption := IntToStr(frmUpdateNew.tDBFfrom1C.RecordCount);
+    m := frmUpdateNew.tDBFfrom1C.Fields.Fields[6].AsInteger;
+    y := frmUpdateNew.tDBFfrom1C.Fields.Fields[5].AsInteger;
+    p := frmUpdateNew.tDBFfrom1C.Fields.Fields[7].AsInteger;
+    case p of
+      1:
+      begin
+        db := 1;
+        de := 14;
+      end;
+      2:
+      begin
+        db := 15;
+        de := DaysInAMonth(y, m);
+      end;
+    end;
+    frmUpdateNew.lPeriod.Caption := 'c ' + DateToStr(EncodeDateTime(y, m, db, 0, 0, 0, 0)) + ' по ' + DateToStr(EncodeDateTime(y, m, de, 0, 0, 0, 0));
+    frmUpdateNew.btnStep1.Visible := true;
+  end;
+end;
+
+procedure TfrmUpdateNew.FormShow(Sender: TObject);
+begin
+  tIniSett := TIniFile.Create(PutchFolderPrj + '\Setting.ini');
+  frmUpdateNew.Edit1.Text := tIniSett.ReadString('Setting', 'BasaFrom1C', '') + tIniSett.ReadString('Setting', 'TableFrom1C', '');
+  tIniSett.Destroy;
+  fncShowNameFile(frmUpdateNew.Edit1.Text);
+end;
+
+procedure TfrmUpdateNew.Button2Click(Sender: TObject);
+begin
+  frmUpdateNew.mAction.Lines.Add('ќтчет на ' + DateTimeToStr(Now));
+  //удал€ем двойные записи в перс
+  qTemp.SQL.Clear;
+  qTemp.SQL.Add('select *, p1.pers_id as pers1 from pers p1, pers p2');
+  qTemp.SQL.Add('where p1.pers_id<>p2.pers_id and p1.card_id=p2.card_id');
+  qTemp.SQL.Add('and p1.flagkredita=2');
+  qTemp.SQL.Add('order by p1.family, p1.pers_id');
+  qTemp.Execute(true);
+  qTemp.Open;
+   while not qTemp.Eof do begin
+        qUpdate.Close;
+        qUpdate.SQL.Clear;
+        qUpdate.SQL.Add('delete from pers');
+        qUpdate.SQL.Add('where pers_id='+qTemp.fieldbyname('pers1').AsString);
+        qUpdate.SQL.Add('and flagkredita=2');
+        qUpdate.Execute;
+        qTemp.Next;
+   end;
+
+  qTemp.SQL.Clear;
+  qTemp.SQL.Add('select * from pers p1, pers p2');
+  qTemp.SQL.Add('where p1.pers_id<>p2.pers_id and p1.card_id=p2.card_id');
+  qTemp.SQL.Add('order by p1.family, p1.pers_id');
+  qTemp.Execute(true);
+  qTemp.Open;
+
+  if qTemp.RecordCount <> 0 then
+  begin
+    frmUpdateNew.mAction.Lines.Add('≈сть задвоение записей!');
+  end
+  else
+  begin
+    frmUpdateNew.mAction.Lines.Add('«адвоение записей не обнаружено!');
+  end;
+
+  qTemp.Close;
+  qTemp.SQL.Clear;
+  qTemp.SQL.Add('SELECT count(card_id) as cou FROM card where statecard_id=1');
+  qTemp.Open;
+  frmUpdateNew.mAction.Lines.Add('количество кредитуемых Ѕ—  ' + qTemp.FieldByName('cou').AsString);
+
+  qTemp.Close;
+  qTemp.SQL.Clear;
+  qTemp.SQL.Add('SELECT count(pers_id) as cou FROM pers where flagkredita=1');
+  qTemp.Open;
+  frmUpdateNew.mAction.Lines.Add('количество кредитуемых людей ' + qTemp.FieldByName('cou').AsString);
+
+  qTemp.Close;
+  qTemp.SQL.Clear;
+  qTemp.SQL.Add('SELECT count(datebegin) as cou, max(datebegin) as mdb, max(dateend) as mde FROM credits');
+  qTemp.SQL.Add('where datebegin=(select max(datebegin) FROM credits)');
+  qTemp.Open;
+  frmUpdateNew.mAction.Lines.Add('кол-во выданных кредитов ' + qTemp.FieldByName('cou').AsString);
+  frmUpdateNew.mAction.Lines.Add('последний период с ' + qTemp.FieldByName('mdb').AsString + ' по ' + qTemp.FieldByName('mde').AsString);
+
+  {  qTemp.Close;
+  qTemp.SQL.Clear;
+  qTemp.SQL.Add('SELECT count(card_id) as cou FROM card where statecard_id=1');
+  qTemp.Open;
+  frmUpdateNew.mAction.Lines.Add(DateTimeToStr(Now) + ' count card ' + qTemp.FieldByName('cou').AsString);}
+end;
+
+end.
+
